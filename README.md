@@ -178,7 +178,7 @@ if (b == 0) {
     pk_1 <- pk + x
 } else {
     pk_0 <- pk + (-x)
-    pk_1 <- x
+    pk_1 <- pk
 }
 Output: seed, pk_0, sk.
 Send seed, pk_0 to the sender.
@@ -294,7 +294,87 @@ On the other hand, if the receiver holds `b == 1` then it will ignore the invali
 
 ## The Modified Protocol
 
-TODO: Formally describe the modified protocol.
+To fix the vulnerability described above, we let the receiver recover the full randomness used to generate the ciphertexts in step 2.
+However, this implies that in step 5 we cannot reuse the keys exchanged during step 2 and 3.
+Instead, we must generate new secrets and ciphertexts in step 5.
+
+Step 1 remains the same as BDGM19.
+The receiver sends `seed` and `pk_0` to the sender.
+However, the receiver additionally stores `pk_0, pk_1` for future use.
+
+Step 2 is modified as follows:
+```text
+Input: seed, pk_0 from step 1.
+pk_1 <- pk_0 + Hash_1(seed)
+s_0 <- GenSecret(pk_0)
+s_1 <- GenSecret(pk_1)
+(ct_0, key_0) <- Encapsulate(pk_0, s_0)
+(ct_1, key_1) <- Encapsulate(pk_1, s_1)
+common_secret <- GetRandom(lambda)
+mask_0 <- Hash_2(key_0)
+mask_1 <- Hash_3(key_1)
+a_0 <- mask_0 XOR (s_0 || s_1 || common_secret)
+a_1 <- mask_1 XOR (s_0 || s_1 || common_secret)
+tag <- Hash_4(s_0 || s_1 || common_secret)
+ch <- Hash_5(s_0 || s_1 || common_secret)
+Output: ct_0, ct_1, a_0, a_1, tag, ch, common_secret.
+Send ct_0, ct_1, a_0, a_1, tag to the receiver.
+Store common_secret, ch for future use.
+```
+
+Step 3 is modified as follows:
+```text
+Input: b, pk_0, pk_1, sk from step 1; ct_0, ct_1, a_0, a_1, tag from step 2.
+pk <- pk_b
+ct <- ct_b
+a <- a_b
+key <- Decapsulate(sk, ct)
+mask <- Hash_(2+b)(key)
+(s_0, s_1, common_secret) <- mask XOR a
+Check that Encapsulate(pk, s_b) == ct. Abort if this step fails.
+(ct', key') <- Encapsulate(pk_(1-b), s_(1-b))
+Check that ct' == ct_(1-b). Abort if this step fails.
+mask' <- Hash_(2+(1-b))(key')
+(s'_0, s'_1, common_secret') <- mask' XOR a_(1-b)
+Check that (s_0, s_1, common_secret) == (s'_0, s'_1, common_secret'). Abort if this step fails.
+Check that Hash_4(s_0 || s_1 || common_secret) == tag. Abort if this step fails.
+resp <- Hash_5(s_0 || s_1 || common_secret)
+Output: common_secret, resp.
+Send resp to the sender.
+Store common_secret for future use.
+```
+
+Step 4 remains the same as BDGM19. The sender checks that `ch == resp`.
+
+Step 5 is modified as follows:
+```text
+Input: msg_0, msg_1; pk_0, pk_1, common_secret from step 2.
+s_0 <- GenSecret(pk_0)
+s_1 <- GenSecret(pk_1)
+(ct_0, key_0) <- Encapsulate(pk_0, s_0)
+(ct_1, key_1) <- Encapsulate(pk_1, s_1)
+mask_0 <- Hash_6(common_secret || key_0)
+mask_1 <- Hash_7(common_secret || key_1)
+a_0 <- mask_0 XOR msg_0
+a_1 <- mask_1 XOR msg_1
+tag_0 <- Hash_8(common_secret || key_0 || msg_0)
+tag_1 <- Hash_9(common_secret || key_1 || msg_1)
+Output: ct_0, ct_1, a_0, a_1, tag_0, tag_1.
+Send ct_0, ct_1, a_0, a_1, tag_0, tag_1 to the receiver.
+```
+
+Step 6 is modified as follows:
+```text
+Input: b, sk from step 1; common_secret from step 3; ct_0, ct_1, a_0, a_1, tag_0, tag_1 from step 5.
+ct <- ct_b
+a <- a_b
+tag <- tag_b
+key <- Decapsulate(sk, ct)
+mask <- Hash_(6+b)(common_secret || key)
+msg <- mask XOR a
+Check thag Hash_(8+b)(common_secret || key || msg) == tag. Abort if this step fails.
+Output: msg.
+```
 
 ## The Implementation
 
