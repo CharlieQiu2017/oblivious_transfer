@@ -1,0 +1,6 @@
+*.a
+*.o
+obj/*
+tmp/*
+wip/*
+test-bin/*
