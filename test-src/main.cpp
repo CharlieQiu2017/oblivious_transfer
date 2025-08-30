@@ -23,7 +23,6 @@ extern "C" {
 
     OT::bdgm_ot_step1 (b, pk0, receiver);
 
-
     typename kem_trait::ciphertext_t ct0, ct1;
     std::array < unsigned char, 2 * kem_trait::secret_len + 2 * security_len > symct0, symct1;
     std::array < unsigned char, security_len > tag;
