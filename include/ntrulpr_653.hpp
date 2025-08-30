@@ -2,7 +2,6 @@
 
 #include <stdint.h>
 #include <string.h>
-#include <crypto/pk/ntru_lprime/ntru_lprime.h>
 #include <utility>
 #include <array>
 
