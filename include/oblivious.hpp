@@ -464,8 +464,7 @@ public:
    const std::array < unsigned char, security_len > &tag0,
    const std::array < unsigned char, security_len > &tag1,
    std::array < unsigned char, msg_len > &msg_out,
-   bdgm_ot_receiver_state &st
-   ) {
+   bdgm_ot_receiver_state &st) {
     if (st.stage != 2) std::terminate ();
 
     /* Copy the chosen ct and tag */
