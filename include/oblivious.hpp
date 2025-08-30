@@ -64,8 +64,8 @@ public:
   };
 
   /* Step 1: Receiver gets input bit b.
-     It generates a random seed, hashes the seed to a random public key,
-     and computes pkb and pk(1-b).
+     It generates a random seed, hashes the seed to a random public key diff,
+     and computes pk_b and pk_(1-b), which we call pk and pk_alt.
      It sends to sender seed and pk0.
 
      This function only provides pk0 output.
@@ -81,20 +81,18 @@ public:
     /* Generate random key diff seed */
     getrandom (st.seed.data (), security_len, 0);
 
-    /* Hash seed to get random diff */
-    std::array < unsigned char, kem_trait::hash_len > hash;
+    /* Hash seed to get random diff and compute pk_alt */
     {
+      std::array < unsigned char, kem_trait::hash_len > hash;
       typename xof_trait::hash_state_t hash_st;
       xof_trait::add_input (st.seed.data (), security_len, hash_st);
       xof_trait::finalize_input (hash_st);
       xof_trait::get_output (kem_trait::hash_len, hash.data (), hash_st);
+
+      typename kem_trait::public_key_diff_t diff;
+      kem_trait::gen_public_key_diff_from_hash (hash, diff);
+      kem_trait::compute_alt_public_key (st.pk, diff, st.pk_alt, b);
     }
-
-    typename kem_trait::public_key_diff_t diff;
-    kem_trait::gen_public_key_diff_from_hash (hash, diff);
-
-    /* Compute pk_alt */
-    kem_trait::compute_alt_public_key (st.pk, diff, st.pk_alt, b);
 
     /* Output pk0 */
     uint32_t b_val = b;
@@ -104,7 +102,7 @@ public:
     st.stage = 1;
   }
 
-  /* Step 2: Sender receives seed and pk0, and generates a common secret and two ciphertexts.
+  /* Step 2: Sender receives seed and pk0, computes pk1, and generates a common secret and two ciphertexts.
      The ciphertext consists of an asymmetric part (coming from the KEM) and a symmetric part.
      The plaintext of the symmetric part is secret0 || secret1 || common_secret
      where secret0 and secret1 are the randomness used to generate the two asymmetric ciphertexts.
@@ -131,12 +129,13 @@ public:
     /* Hash seed to get random diff */
     /* Apply diff to pk0 to get pk1 */
     {
-      typename kem_trait::public_key_diff_t diff;
       std::array < unsigned char, kem_trait::hash_len > hash;
       typename xof_trait::hash_state_t hash_st;
       xof_trait::add_input (st.seed.data (), security_len, hash_st);
       xof_trait::finalize_input (hash_st);
       xof_trait::get_output (kem_trait::hash_len, hash.data (), hash_st);
+
+      typename kem_trait::public_key_diff_t diff;
       kem_trait::gen_public_key_diff_from_hash (hash, diff);
       kem_trait::compute_alt_public_key (st.pk0, diff, st.pk1, false);
     }
@@ -154,56 +153,66 @@ public:
     kem_trait::encapsulate (st.pk0, secret0, ct0_out, key0);
     kem_trait::encapsulate (st.pk1, secret1, ct1_out, key1);
 
-    /* The symmetric plaintext is secret0 || secret1 || common_secret */
-    /* The symmetric ciphertext consists of an IV (of length security_len) and plaintext XOR Hash(seed || pk0 || pk1 || 0x00 or 0x01 || 7 bytes of 0x00 || key0 or key1 || IV) */
+    /* symct0 <- IV0 || secret0 || secret1 || common_secret */
+    /* symct1 <- IV1 || secret0 || secret1 || common_secret */
+    /* Later, we shall encrypt symct0 and symct1 (excluding the IV part) by XORing with
+       mask = Hash(seed || pk0 || pk1 || 0x00 or 0x01 || 7 bytes of 0x00 || key0 or key1 || IV0 or IV1).
+     */
     getrandom (symct0_out.data (), security_len, 0);
-    getrandom (symct1_out.data (), security_len, 0);
-
     memcpy (symct0_out.data () + security_len, secret0.data (), kem_trait::secret_len);
     memcpy (symct0_out.data () + security_len + kem_trait::secret_len, secret1.data (), kem_trait::secret_len);
     memcpy (symct0_out.data () + security_len + 2 * kem_trait::secret_len, st.common_secret.data (), security_len);
 
+    getrandom (symct1_out.data (), security_len, 0);
     memcpy (symct1_out.data () + security_len, secret0.data (), kem_trait::secret_len);
     memcpy (symct1_out.data () + security_len + kem_trait::secret_len, secret1.data (), kem_trait::secret_len);
     memcpy (symct1_out.data () + security_len + 2 * kem_trait::secret_len, st.common_secret.data (), security_len);
 
-    /* Compute the two XOR masks and the confirmation tag */
-    std::array < unsigned char, security_len + 2 * kem_trait::secret_len > mask0, mask1;
+    /* Prepare hash state (seed || pk0 || pk1) to avoid repeated computation */
+    typename xof_trait::hash_state_t hash_st_init;
+    xof_trait::add_input (st.seed.data (), security_len, hash_st_init);
+    xof_trait::add_input (st.pk0.data (), kem_trait::public_key_len, hash_st_init);
+    xof_trait::add_input (st.pk1.data (), kem_trait::public_key_len, hash_st_init);
 
+    /* Mask symct0 */
     {
-      typename xof_trait::hash_state_t hash_st0, hash_st1, hash_st_tag;
-      xof_trait::add_input (st.seed.data (), security_len, hash_st0);
-      xof_trait::add_input (st.pk0.data (), kem_trait::public_key_len, hash_st0);
-      xof_trait::add_input (st.pk1.data (), kem_trait::public_key_len, hash_st0);
-      hash_st1 = hash_st0;
-      hash_st_tag = hash_st0;
-
+      std::array < unsigned char, security_len + 2 * kem_trait::secret_len > mask0;
+      typename xof_trait::hash_state_t hash_st_mask0 = hash_st_init;
       uint64_t ctr = 0;
-      xof_trait::add_input ((const unsigned char *) &ctr, 8, hash_st0);
-      ctr = 1;
-      xof_trait::add_input ((const unsigned char *) &ctr, 8, hash_st1);
-      ctr = 2;
+      xof_trait::add_input ((const unsigned char *) &ctr, 8, hash_st_mask0);
+      xof_trait::add_input (key0.data (), kem_trait::sym_key_len, hash_st_mask0);
+      xof_trait::add_input (symct0_out.data (), security_len, hash_st_mask0);
+      xof_trait::finalize_input (hash_st_mask0);
+      xof_trait::get_output (security_len + 2 * kem_trait::secret_len, mask0.data (), hash_st_mask0);
+
+      memxor (symct0_out.data () + security_len, mask0.data (), security_len + 2 * kem_trait::secret_len);
+    }
+
+    /* Mask symct1 */
+    {
+      std::array < unsigned char, security_len + 2 * kem_trait::secret_len > mask1;
+      typename xof_trait::hash_state_t hash_st_mask1 = hash_st_init;
+      uint64_t ctr = 1;
+      xof_trait::add_input ((const unsigned char *) &ctr, 8, hash_st_mask1);
+      xof_trait::add_input (key1.data (), kem_trait::sym_key_len, hash_st_mask1);
+      xof_trait::add_input (symct1_out.data (), security_len, hash_st_mask1);
+      xof_trait::finalize_input (hash_st_mask1);
+      xof_trait::get_output (security_len + 2 * kem_trait::secret_len, mask1.data (), hash_st_mask1);
+
+      memxor (symct1_out.data () + security_len, mask1.data (), security_len + 2 * kem_trait::secret_len);
+    }
+
+    /* Compute the confirmation tag */
+    {
+      typename xof_trait::hash_state_t hash_st_tag = hash_st_init;
+      uint64_t ctr = 2;
       xof_trait::add_input ((const unsigned char *) &ctr, 8, hash_st_tag);
-
-      xof_trait::add_input (key0.data (), kem_trait::sym_key_len, hash_st0);
-      xof_trait::add_input (symct0_out.data (), security_len, hash_st0);
-      xof_trait::finalize_input (hash_st0);
-      xof_trait::get_output (security_len + 2 * kem_trait::secret_len, mask0.data (), hash_st0);
-
-      xof_trait::add_input (key1.data (), kem_trait::sym_key_len, hash_st1);
-      xof_trait::add_input (symct1_out.data (), security_len, hash_st1);
-      xof_trait::finalize_input (hash_st1);
-      xof_trait::get_output (security_len + 2 * kem_trait::secret_len, mask1.data (), hash_st1);
-
       xof_trait::add_input (secret0.data (), kem_trait::secret_len, hash_st_tag);
       xof_trait::add_input (secret1.data (), kem_trait::secret_len, hash_st_tag);
       xof_trait::add_input (st.common_secret.data (), security_len, hash_st_tag);
       xof_trait::finalize_input (hash_st_tag);
       xof_trait::get_output (security_len, tag_out.data (), hash_st_tag);
     }
-
-    memxor (symct0_out.data () + security_len, mask0.data (), security_len + 2 * kem_trait::secret_len);
-    memxor (symct1_out.data () + security_len, mask1.data (), security_len + 2 * kem_trait::secret_len);
 
     st.stage = 1;
   }
@@ -222,7 +231,7 @@ public:
     if (st.stage != 1) std::terminate ();
     uint32_t b_val = st.b;
 
-    /* ctb and ct(1-b) */
+    /* ct_b and ct_(1-b) */
     typename kem_trait::ciphertext_t ct, ct_alt;
     std::array < unsigned char, 2 * kem_trait::secret_len + 2 * security_len > symct, symct_alt;
 
@@ -236,7 +245,7 @@ public:
     cond_memcpy (1 - b_val, ct_alt.data (), ct1.data (), kem_trait::ciphertext_len);
     cond_memcpy (1 - b_val, symct_alt.data (), symct1.data (), 2 * kem_trait::secret_len + 2 * security_len);
 
-    /* Decrypt ctb */
+    /* Decrypt ct_b */
     typename kem_trait::sym_key_t symkey;
     kem_trait::decapsulate (st.sk, ct, symkey);
 
@@ -381,7 +390,7 @@ public:
     getrandom (symct0_out.data (), security_len, 0);
     getrandom (symct1_out.data (), security_len, 0);
 
-    /* Copy plaintext to ciphertext */
+    /* Copy the two messages */
     memcpy (symct0_out.data () + security_len, msg0.data (), msg_len);
     memcpy (symct1_out.data () + security_len, msg1.data (), msg_len);
 
@@ -391,28 +400,32 @@ public:
     xof_trait::add_input (st.pk0.data (), kem_trait::public_key_len, hash_st_init);
     xof_trait::add_input (st.pk1.data (), kem_trait::public_key_len, hash_st_init);
 
-    /* Compute the two masks.
+    /* Mask the two messages.
        Each mask is Hash(seed || pk0 || pk1 || 0x04 or 0x05 || 7 bytes of 0x00 || key0 or key1 || IV0 or IV1)
      */
     {
-      std::array < unsigned char, msg_len > mask0, mask1;
-      typename xof_trait::hash_state_t hash_st_mask0 = hash_st_init, hash_st_mask1 = hash_st_init;
+      std::array < unsigned char, msg_len > mask0;
+      typename xof_trait::hash_state_t hash_st_mask0 = hash_st_init;
       uint64_t ctr = 4;
       xof_trait::add_input ((const unsigned char *) &ctr, 8, hash_st_mask0);
-      ctr = 5;
-      xof_trait::add_input ((const unsigned char *) &ctr, 8, hash_st_mask1);
-
       xof_trait::add_input (key0.data (), kem_trait::sym_key_len, hash_st_mask0);
       xof_trait::add_input (symct0_out.data (), security_len, hash_st_mask0);
       xof_trait::finalize_input (hash_st_mask0);
       xof_trait::get_output (msg_len, mask0.data (), hash_st_mask0);
 
+      memxor (symct0_out.data () + security_len, mask0.data (), msg_len);
+    }
+
+    {
+      std::array < unsigned char, msg_len > mask1;
+      typename xof_trait::hash_state_t hash_st_mask1 = hash_st_init;
+      uint64_t ctr = 5;
+      xof_trait::add_input ((const unsigned char *) &ctr, 8, hash_st_mask1);
       xof_trait::add_input (key1.data (), kem_trait::sym_key_len, hash_st_mask1);
       xof_trait::add_input (symct1_out.data (), security_len, hash_st_mask1);
       xof_trait::finalize_input (hash_st_mask1);
       xof_trait::get_output (msg_len, mask1.data (), hash_st_mask1);
 
-      memxor (symct0_out.data () + security_len, mask0.data (), msg_len);
       memxor (symct1_out.data () + security_len, mask1.data (), msg_len);
     }
 
@@ -420,17 +433,19 @@ public:
        Each tag is Hash(seed || pk0 || pk1 || 0x06 or 0x07 || 7 bytes of 0x00 || key0 or key1 || msg0 or msg1)
      */
     {
-      typename xof_trait::hash_state_t hash_st_tag0 = hash_st_init, hash_st_tag1 = hash_st_init;
+      typename xof_trait::hash_state_t hash_st_tag0 = hash_st_init;
       uint64_t ctr = 6;
       xof_trait::add_input ((const unsigned char *) &ctr, 8, hash_st_tag0);
-      ctr = 7;
-      xof_trait::add_input ((const unsigned char *) &ctr, 8, hash_st_tag1);
-
       xof_trait::add_input (key0.data (), security_len, hash_st_tag0);
       xof_trait::add_input (msg0.data (), security_len, hash_st_tag0);
       xof_trait::finalize_input (hash_st_tag0);
       xof_trait::get_output (security_len, tag0_out.data (), hash_st_tag0);
+    }
 
+    {
+      typename xof_trait::hash_state_t hash_st_tag1 = hash_st_init;
+      uint64_t ctr = 7;
+      xof_trait::add_input ((const unsigned char *) &ctr, 8, hash_st_tag1);
       xof_trait::add_input (key1.data (), security_len, hash_st_tag1);
       xof_trait::add_input (msg1.data (), security_len, hash_st_tag1);
       xof_trait::finalize_input (hash_st_tag1);
