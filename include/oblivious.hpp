@@ -106,8 +106,8 @@ public:
      The ciphertext consists of an asymmetric part (coming from the KEM) and a symmetric part.
      The plaintext of the symmetric part is secret0 || secret1 || common_secret
      where secret0 and secret1 are the randomness used to generate the two asymmetric ciphertexts.
-     The symmetric plaintext is encrypted by XORing with Hash(seed || pk0 || pk1 || 0x00 or 0x01 || 7 bytes of 0x00 || key0 or key1 || IV0 or IV1)
-     where key0, key1 are the symmetric keys exchanged via the KEM; IV0, IV1 are random initialization vectors.
+     The symmetric plaintext is encrypted by XORing with Hash(seed || pk0 || pk1 || 0x00 or 0x01 || 7 bytes of 0x00 || key0 or key1)
+     where key0, key1 are the symmetric keys exchanged via the KEM.
      Then sender also provides a hash confirmation of the symmetric plaintext for authentication.
      The confirmation is Hash(seed || pk0 || pk1 || 0x02 || 7 bytes of 0x00 || secret0 || secret1 || common_secret).
    */
@@ -116,8 +116,8 @@ public:
    const kem_trait::public_key_t &pk0,
    kem_trait::ciphertext_t &ct0_out,
    kem_trait::ciphertext_t &ct1_out,
-   std::array < unsigned char, 2 * kem_trait::secret_len + 2 * security_len > &symct0_out,
-   std::array < unsigned char, 2 * kem_trait::secret_len + 2 * security_len > &symct1_out,
+   std::array < unsigned char, 2 * kem_trait::secret_len + security_len > &symct0_out,
+   std::array < unsigned char, 2 * kem_trait::secret_len + security_len > &symct1_out,
    std::array < unsigned char, security_len > &tag_out,
    bdgm_ot_sender_state &st) {
     if (st.stage != 0) std::terminate ();
@@ -153,20 +153,18 @@ public:
     kem_trait::encapsulate (st.pk0, secret0, ct0_out, key0);
     kem_trait::encapsulate (st.pk1, secret1, ct1_out, key1);
 
-    /* symct0 <- IV0 || secret0 || secret1 || common_secret */
-    /* symct1 <- IV1 || secret0 || secret1 || common_secret */
-    /* Later, we shall encrypt symct0 and symct1 (excluding the IV part) by XORing with
-       mask = Hash(seed || pk0 || pk1 || 0x00 or 0x01 || 7 bytes of 0x00 || key0 or key1 || IV0 or IV1).
+    /* symct0 <- secret0 || secret1 || common_secret */
+    /* symct1 <- secret0 || secret1 || common_secret */
+    /* Later, we shall encrypt symct0 and symct1 by XORing with
+       mask = Hash(seed || pk0 || pk1 || 0x00 or 0x01 || 7 bytes of 0x00 || key0 or key1).
      */
-    getrandom (symct0_out.data (), security_len, 0);
-    memcpy (symct0_out.data () + security_len, secret0.data (), kem_trait::secret_len);
-    memcpy (symct0_out.data () + security_len + kem_trait::secret_len, secret1.data (), kem_trait::secret_len);
-    memcpy (symct0_out.data () + security_len + 2 * kem_trait::secret_len, st.common_secret.data (), security_len);
+    memcpy (symct0_out.data (), secret0.data (), kem_trait::secret_len);
+    memcpy (symct0_out.data () + kem_trait::secret_len, secret1.data (), kem_trait::secret_len);
+    memcpy (symct0_out.data () + 2 * kem_trait::secret_len, st.common_secret.data (), security_len);
 
-    getrandom (symct1_out.data (), security_len, 0);
-    memcpy (symct1_out.data () + security_len, secret0.data (), kem_trait::secret_len);
-    memcpy (symct1_out.data () + security_len + kem_trait::secret_len, secret1.data (), kem_trait::secret_len);
-    memcpy (symct1_out.data () + security_len + 2 * kem_trait::secret_len, st.common_secret.data (), security_len);
+    memcpy (symct1_out.data (), secret0.data (), kem_trait::secret_len);
+    memcpy (symct1_out.data () + kem_trait::secret_len, secret1.data (), kem_trait::secret_len);
+    memcpy (symct1_out.data () + 2 * kem_trait::secret_len, st.common_secret.data (), security_len);
 
     /* Prepare hash state (seed || pk0 || pk1) to avoid repeated computation */
     typename xof_trait::hash_state_t hash_st_init;
@@ -181,11 +179,10 @@ public:
       uint64_t ctr = 0;
       xof_trait::add_input ((const unsigned char *) &ctr, 8, hash_st_mask0);
       xof_trait::add_input (key0.data (), kem_trait::sym_key_len, hash_st_mask0);
-      xof_trait::add_input (symct0_out.data (), security_len, hash_st_mask0);
       xof_trait::finalize_input (hash_st_mask0);
       xof_trait::get_output (security_len + 2 * kem_trait::secret_len, mask0.data (), hash_st_mask0);
 
-      memxor (symct0_out.data () + security_len, mask0.data (), security_len + 2 * kem_trait::secret_len);
+      memxor (symct0_out.data (), mask0.data (), security_len + 2 * kem_trait::secret_len);
     }
 
     /* Mask symct1 */
@@ -195,11 +192,10 @@ public:
       uint64_t ctr = 1;
       xof_trait::add_input ((const unsigned char *) &ctr, 8, hash_st_mask1);
       xof_trait::add_input (key1.data (), kem_trait::sym_key_len, hash_st_mask1);
-      xof_trait::add_input (symct1_out.data (), security_len, hash_st_mask1);
       xof_trait::finalize_input (hash_st_mask1);
       xof_trait::get_output (security_len + 2 * kem_trait::secret_len, mask1.data (), hash_st_mask1);
 
-      memxor (symct1_out.data () + security_len, mask1.data (), security_len + 2 * kem_trait::secret_len);
+      memxor (symct1_out.data (), mask1.data (), security_len + 2 * kem_trait::secret_len);
     }
 
     /* Compute the confirmation tag */
@@ -223,8 +219,8 @@ public:
   static bool bdgm_ot_step3
   (const kem_trait::ciphertext_t &ct0,
    const kem_trait::ciphertext_t &ct1,
-   const std::array < unsigned char, 2 * kem_trait::secret_len + 2 * security_len > &symct0,
-   const std::array < unsigned char, 2 * kem_trait::secret_len + 2 * security_len > &symct1,
+   const std::array < unsigned char, 2 * kem_trait::secret_len + security_len > &symct0,
+   const std::array < unsigned char, 2 * kem_trait::secret_len + security_len > &symct1,
    const std::array < unsigned char, security_len > &tag,
    std::array < unsigned char, security_len > &resp_out,
    bdgm_ot_receiver_state &st) {
@@ -233,17 +229,17 @@ public:
 
     /* ct_b and ct_(1-b) */
     typename kem_trait::ciphertext_t ct, ct_alt;
-    std::array < unsigned char, 2 * kem_trait::secret_len + 2 * security_len > symct, symct_alt;
+    std::array < unsigned char, 2 * kem_trait::secret_len + security_len > symct, symct_alt;
 
     cond_memcpy (1 - b_val, ct.data (), ct0.data (), kem_trait::ciphertext_len);
-    cond_memcpy (1 - b_val, symct.data (), symct0.data (), 2 * kem_trait::secret_len + 2 * security_len);
+    cond_memcpy (1 - b_val, symct.data (), symct0.data (), 2 * kem_trait::secret_len + security_len);
     cond_memcpy (b_val, ct.data (), ct1.data (), kem_trait::ciphertext_len);
-    cond_memcpy (b_val, symct.data (), symct1.data (), 2 * kem_trait::secret_len + 2 * security_len);
+    cond_memcpy (b_val, symct.data (), symct1.data (), 2 * kem_trait::secret_len + security_len);
 
     cond_memcpy (b_val, ct_alt.data (), ct0.data (), kem_trait::ciphertext_len);
-    cond_memcpy (b_val, symct_alt.data (), symct0.data (), 2 * kem_trait::secret_len + 2 * security_len);
+    cond_memcpy (b_val, symct_alt.data (), symct0.data (), 2 * kem_trait::secret_len + security_len);
     cond_memcpy (1 - b_val, ct_alt.data (), ct1.data (), kem_trait::ciphertext_len);
-    cond_memcpy (1 - b_val, symct_alt.data (), symct1.data (), 2 * kem_trait::secret_len + 2 * security_len);
+    cond_memcpy (1 - b_val, symct_alt.data (), symct1.data (), 2 * kem_trait::secret_len + security_len);
 
     /* Decrypt ct_b */
     typename kem_trait::sym_key_t symkey;
@@ -267,11 +263,10 @@ public:
       uint64_t ctr = b_val;
       xof_trait::add_input ((const unsigned char *) &ctr, 8, hash_st);
       xof_trait::add_input (symkey.data (), kem_trait::sym_key_len, hash_st);
-      xof_trait::add_input (symct.data (), security_len, hash_st);
       xof_trait::finalize_input (hash_st);
       xof_trait::get_output (security_len + 2 * kem_trait::secret_len, plaintext.data (), hash_st);
     }
-    memxor (plaintext.data (), symct.data () + security_len, security_len + 2 * kem_trait::secret_len);
+    memxor (plaintext.data (), symct.data (), security_len + 2 * kem_trait::secret_len);
 
     /* At this point, plaintext should contain secret0,
        plaintext + kem_trait::secret_len should contain secret1,
@@ -303,11 +298,10 @@ public:
       uint64_t ctr = 1 - b_val;
       xof_trait::add_input ((const unsigned char *) &ctr, 8, hash_st_alt);
       xof_trait::add_input (symkey_alt.data (), kem_trait::sym_key_len, hash_st_alt);
-      xof_trait::add_input (symct_alt.data (), security_len, hash_st_alt);
       xof_trait::finalize_input (hash_st_alt);
       xof_trait::get_output (security_len + 2 * kem_trait::secret_len, plaintext_alt.data (), hash_st_alt);
     }
-    memxor (plaintext_alt.data (), symct_alt.data () + security_len, security_len + 2 * kem_trait::secret_len);
+    memxor (plaintext_alt.data (), symct_alt.data (), security_len + 2 * kem_trait::secret_len);
 
     uint64_t check_flag3 = safe_memcmp (plaintext.data (), plaintext_alt.data (), security_len + 2 * kem_trait::secret_len);
 
@@ -369,8 +363,8 @@ public:
    const std::array < unsigned char, msg_len > &msg1,
    kem_trait::ciphertext_t &ct0_out,
    kem_trait::ciphertext_t &ct1_out,
-   std::array < unsigned char, security_len + msg_len > &symct0_out,
-   std::array < unsigned char, security_len + msg_len > &symct1_out,
+   std::array < unsigned char, msg_len > &symct0_out,
+   std::array < unsigned char, msg_len > &symct1_out,
    std::array < unsigned char, security_len > &tag0_out,
    std::array < unsigned char, security_len > &tag1_out,
    bdgm_ot_sender_state &st) {
@@ -386,13 +380,9 @@ public:
     kem_trait::encapsulate (st.pk0, secret0, ct0_out, key0);
     kem_trait::encapsulate (st.pk1, secret1, ct1_out, key1);
 
-    /* Generate two IVs */
-    getrandom (symct0_out.data (), security_len, 0);
-    getrandom (symct1_out.data (), security_len, 0);
-
     /* Copy the two messages */
-    memcpy (symct0_out.data () + security_len, msg0.data (), msg_len);
-    memcpy (symct1_out.data () + security_len, msg1.data (), msg_len);
+    memcpy (symct0_out.data (), msg0.data (), msg_len);
+    memcpy (symct1_out.data (), msg1.data (), msg_len);
 
     /* Prepare hash state (seed || pk0 || pk1) to avoid repeated computation */
     typename xof_trait::hash_state_t hash_st_init;
@@ -401,7 +391,7 @@ public:
     xof_trait::add_input (st.pk1.data (), kem_trait::public_key_len, hash_st_init);
 
     /* Mask the two messages.
-       Each mask is Hash(seed || pk0 || pk1 || 0x04 or 0x05 || 7 bytes of 0x00 || key0 or key1 || IV0 or IV1)
+       Each mask is Hash(seed || pk0 || pk1 || 0x04 or 0x05 || 7 bytes of 0x00 || key0 or key1)
      */
     {
       std::array < unsigned char, msg_len > mask0;
@@ -409,11 +399,10 @@ public:
       uint64_t ctr = 4;
       xof_trait::add_input ((const unsigned char *) &ctr, 8, hash_st_mask0);
       xof_trait::add_input (key0.data (), kem_trait::sym_key_len, hash_st_mask0);
-      xof_trait::add_input (symct0_out.data (), security_len, hash_st_mask0);
       xof_trait::finalize_input (hash_st_mask0);
       xof_trait::get_output (msg_len, mask0.data (), hash_st_mask0);
 
-      memxor (symct0_out.data () + security_len, mask0.data (), msg_len);
+      memxor (symct0_out.data (), mask0.data (), msg_len);
     }
 
     {
@@ -422,11 +411,10 @@ public:
       uint64_t ctr = 5;
       xof_trait::add_input ((const unsigned char *) &ctr, 8, hash_st_mask1);
       xof_trait::add_input (key1.data (), kem_trait::sym_key_len, hash_st_mask1);
-      xof_trait::add_input (symct1_out.data (), security_len, hash_st_mask1);
       xof_trait::finalize_input (hash_st_mask1);
       xof_trait::get_output (msg_len, mask1.data (), hash_st_mask1);
 
-      memxor (symct1_out.data () + security_len, mask1.data (), msg_len);
+      memxor (symct1_out.data (), mask1.data (), msg_len);
     }
 
     /* Compute the authentication tags.
@@ -459,8 +447,8 @@ public:
   static bool bdgm_ot_step6
   (const kem_trait::ciphertext_t &ct0,
    const kem_trait::ciphertext_t &ct1,
-   const std::array < unsigned char, security_len + msg_len > &symct0,
-   const std::array < unsigned char, security_len + msg_len > &symct1,
+   const std::array < unsigned char, msg_len > &symct0,
+   const std::array < unsigned char, msg_len > &symct1,
    const std::array < unsigned char, security_len > &tag0,
    const std::array < unsigned char, security_len > &tag1,
    std::array < unsigned char, msg_len > &msg_out,
@@ -470,15 +458,12 @@ public:
     /* Copy the chosen ct and tag */
     uint32_t b_val = st.b;
     typename kem_trait::ciphertext_t ct;
-    std::array < unsigned char, security_len > iv;
     std::array < unsigned char, security_len > tag;
 
     cond_memcpy (1 - b_val, ct.data (), ct0.data (), kem_trait::ciphertext_len);
     cond_memcpy (b_val, ct.data (), ct1.data (), kem_trait::ciphertext_len);
-    cond_memcpy (1 - b_val, iv.data (), symct0.data (), security_len);
-    cond_memcpy (b_val, iv.data (), symct1.data (), security_len);
-    cond_memcpy (1 - b_val, msg_out.data (), symct0.data () + security_len, msg_len);
-    cond_memcpy (b_val, msg_out.data (), symct1.data () + security_len, msg_len);
+    cond_memcpy (1 - b_val, msg_out.data (), symct0.data (), msg_len);
+    cond_memcpy (b_val, msg_out.data (), symct1.data (), msg_len);
     cond_memcpy (1 - b_val, tag.data (), tag0.data (), security_len);
     cond_memcpy (b_val, tag.data (), tag1.data (), security_len);
 
@@ -507,7 +492,6 @@ public:
       uint64_t ctr = 4 + b_val;
       xof_trait::add_input ((const unsigned char *) &ctr, 8, hash_st_mask);
       xof_trait::add_input (key.data (), kem_trait::sym_key_len, hash_st_mask);
-      xof_trait::add_input (iv.data (), security_len, hash_st_mask);
       xof_trait::finalize_input (hash_st_mask);
       xof_trait::get_output (msg_len, mask.data (), hash_st_mask);
     }

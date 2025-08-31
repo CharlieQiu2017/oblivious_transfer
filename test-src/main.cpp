@@ -24,7 +24,7 @@ extern "C" {
     OT::bdgm_ot_step1 (b, pk0, receiver);
 
     typename kem_trait::ciphertext_t ct0, ct1;
-    std::array < unsigned char, 2 * kem_trait::secret_len + 2 * security_len > symct0, symct1;
+    std::array < unsigned char, 2 * kem_trait::secret_len + security_len > symct0, symct1;
     std::array < unsigned char, security_len > tag;
 
     OT::bdgm_ot_step2 (receiver.seed, pk0, ct0, ct1, symct0, symct1, tag, sender);
@@ -40,7 +40,7 @@ extern "C" {
     getrandom (msg1.data (), msg_len, 0);
 
     kem_trait::ciphertext_t new_ct0, new_ct1;
-    std::array < unsigned char, security_len + msg_len > new_symct0, new_symct1;
+    std::array < unsigned char, msg_len > new_symct0, new_symct1;
     std::array < unsigned char, security_len > new_tag0, new_tag1;
 
     OT::bdgm_ot_step5 (msg0, msg1, new_ct0, new_ct1, new_symct0, new_symct1, new_tag0, new_tag1, sender);
