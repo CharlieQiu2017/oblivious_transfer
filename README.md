@@ -376,6 +376,10 @@ Check thag Hash_(8+b)(common_secret || key || msg) == tag. Abort if this step fa
 Output: msg.
 ```
 
+The modified algorithm explicitly instantiates the symmetric encryption procedures `Enc()` and `Dec()` with `Hash(key) XOR msg`.
+Therefore, we do not require users of the library to provide a symmetric encryption primitive.
+Since every symmetric key is used only once during the protocol, we do not need additional randomness for symmetric encryption.
+
 ## The Implementation
 
 ### The KEM Type Trait
@@ -455,8 +459,8 @@ static void bdgm_ot_step2
    const kem_trait::public_key_t &pk0,
    kem_trait::ciphertext_t &ct0_out,
    kem_trait::ciphertext_t &ct1_out,
-   std::array < unsigned char, 2 * kem_trait::secret_len + 2 * security_len > &symct0_out,
-   std::array < unsigned char, 2 * kem_trait::secret_len + 2 * security_len > &symct1_out,
+   std::array < unsigned char, 2 * kem_trait::secret_len + security_len > &symct0_out,
+   std::array < unsigned char, 2 * kem_trait::secret_len + security_len > &symct1_out,
    std::array < unsigned char, security_len > &tag_out,
    bdgm_ot_sender_state &st);
 
@@ -466,8 +470,8 @@ static void bdgm_ot_step2
 static bool bdgm_ot_step3
   (const kem_trait::ciphertext_t &ct0,
    const kem_trait::ciphertext_t &ct1,
-   const std::array < unsigned char, 2 * kem_trait::secret_len + 2 * security_len > &symct0,
-   const std::array < unsigned char, 2 * kem_trait::secret_len + 2 * security_len > &symct1,
+   const std::array < unsigned char, 2 * kem_trait::secret_len + security_len > &symct0,
+   const std::array < unsigned char, 2 * kem_trait::secret_len + security_len > &symct1,
    const std::array < unsigned char, security_len > &tag,
    std::array < unsigned char, security_len > &resp_out,
    bdgm_ot_receiver_state &st);
@@ -484,8 +488,8 @@ static bool bdgm_ot_step4 (const std::array < unsigned char, security_len > &res
    const std::array < unsigned char, msg_len > &msg1,
    kem_trait::ciphertext_t &ct0_out,
    kem_trait::ciphertext_t &ct1_out,
-   std::array < unsigned char, security_len + msg_len > &symct0_out,
-   std::array < unsigned char, security_len + msg_len > &symct1_out,
+   std::array < unsigned char, msg_len > &symct0_out,
+   std::array < unsigned char, msg_len > &symct1_out,
    std::array < unsigned char, security_len > &tag0_out,
    std::array < unsigned char, security_len > &tag1_out,
    bdgm_ot_sender_state &st);
@@ -496,9 +500,17 @@ static bool bdgm_ot_step4 (const std::array < unsigned char, security_len > &res
 static bool bdgm_ot_step6
   (const kem_trait::ciphertext_t &ct0,
    const kem_trait::ciphertext_t &ct1,
-   const std::array < unsigned char, security_len + msg_len > &symct0,
-   const std::array < unsigned char, security_len + msg_len > &symct1,
+   const std::array < unsigned char, msg_len > &symct0,
+   const std::array < unsigned char, msg_len > &symct1,
    const std::array < unsigned char, security_len > &tag0,
    const std::array < unsigned char, security_len > &tag1,
    std::array < unsigned char, msg_len > &msg_out,
    bdgm_ot_receiver_state &st);
+```
+
+### Instantiation of the Hash Functions
+
+* `Hash_1(seed)` is simply `SHAKE256(seed)`.
+* For each of `Hash_2()` through `Hash_9()`, the input is prepended with `seed || pk_0 || pk_1`.
+Thus we domain-separate each instance of our protocol.
+* Thus, `Hash_k(str)` with `k >= 2` is `SHAKE256(seed || pk_0 || pk_1 || k - 2 || str)` where `k - 2` is interpreted as an 8-byte integer in little-endian encoding.
