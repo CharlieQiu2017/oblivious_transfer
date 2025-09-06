@@ -29,16 +29,18 @@ and provide a C++ implementation of the modified BDGM19 protocol.
 ## Getting Started
 
 This implementation relies on my custom C library (https://github.com/CharlieQiu2017/mini_libc/).
-Specifically, it relies on the following functionalities:
+Specifically, it relies on the following header file and functions:
 * The `getrandom()` syscall interface, which is declared in `<random.h>` in my C library,
 but in glibc it is declared in `<sys/random.h>`.
-* `cond_memcpy()` which provides cryptographically-safe conditional memcpy.
-* `safe_memcmp()` which provides cryptographically-safe memcmp.
-* `memxor()` which computes exclusive-or (XOR) of two memory regions, and is cryptographically-safe.
-* Some other helper functions for cryptography.
+* Some extensions to `<string.h>`:
+  * `cond_memcpy()` which provides cryptographically-safe conditional memcpy.
+  * `safe_memcmp()` which provides cryptographically-safe memcmp.
+  * `memxor()` which computes exclusive-or (XOR) of two memory regions, and is cryptographically-safe.
+* Some other helper functions for cryptography, defined as inline functions in `<crypto/common.h>`.
 These functions rely on inline AArch64 assembly.
 Therefore, this program can only be compiled to an AArch64 target.
-* The NTRU-LPrime key exchange algorithm and the SHAKE256 hash algorithm.
+* The NTRU-LPrime key exchange algorithm, declared in `<crypto/pk/ntru_lprime/ntru_lprime.h>`.
+* The SHAKE256 hash algorithm, declared in `<crypto/hash/keccak/keccak_p.h>`.
 
 BDGM19 is not a "complete" protocol, but rather a "framework".
 It depends on a key exchange mechanism, and a random oracle-indifferentiable hash function,
