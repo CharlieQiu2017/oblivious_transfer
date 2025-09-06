@@ -14,12 +14,16 @@ GCFLAGS = -ffunction-sections
 LDFLAGS = -nostdlib -static --no-dynamic-linker -e _start --gc-sections --build-id=none
 
 ifeq ($(optimize),1)
-OPTFLAGS = -Os -fweb
+  OPTFLAGS = -Os -fweb
 else
-OPTFLAGS = -O0
-ifeq ($(debug),1)
-OPTFLAGS += -g -fdebug-prefix-map=..=$$(readlink -f ..)
-endif
+  OPTFLAGS = -O0
+  ifeq ($(debug),1)
+    ifndef DEBUG_SRC_DIR
+      OPTFLAGS += -g
+    else
+      OPTFLAGS += -g -fdebug-prefix-map=$$(pwd -L)=$(DEBUG_SRC_DIR)
+    endif
+  endif
 endif
 
 LIBGCC = /opt/aarch64-none-elf/lib/gcc/aarch64-none-elf/14.2.0/libgcc.a
