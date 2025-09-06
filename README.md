@@ -30,8 +30,7 @@ and provide a C++ implementation of the modified BDGM19 protocol.
 
 This implementation relies on my custom C library (https://github.com/CharlieQiu2017/mini_libc/).
 Specifically, it relies on the following header file and functions:
-* The `getrandom()` syscall interface, which is declared in `<random.h>` in my C library,
-but in glibc it is declared in `<sys/random.h>`.
+* The `getrandom()` syscall interface, declared in `<sys/random.h>`.
 * Some extensions to `<string.h>`:
   * `cond_memcpy()` which provides cryptographically-safe conditional memcpy.
   * `safe_memcmp()` which provides cryptographically-safe memcmp.

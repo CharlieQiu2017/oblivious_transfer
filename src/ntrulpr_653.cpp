@@ -1,7 +1,7 @@
 #include <stdint.h>
 #include <string.h>
 #include <ntrulpr_653.hpp>
-#include <random.h>
+#include <sys/random.h>
 #include <crypto/common.h>
 #include <crypto/pk/ntru_lprime/ntru_lprime.h>
 #include <crypto/hash/keccak/keccak_p.h>

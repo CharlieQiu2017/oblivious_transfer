@@ -5,7 +5,7 @@
 #include <stddef.h>
 #include <stdint.h>
 #include <string.h>
-#include <random.h>
+#include <sys/random.h>
 #include <crypto/common.h>
 #include <exception>
 #include <array>

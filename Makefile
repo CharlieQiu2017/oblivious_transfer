@@ -30,7 +30,7 @@ LIBGCC = /opt/aarch64-none-elf/lib/gcc/aarch64-none-elf/14.2.0/libgcc.a
 LIBC = /home/z/mini_libc
 LIBSUPCXX = /opt/aarch64-none-elf/aarch64-none-elf/lib/libsupc++_terminate.a
 
-INCFLAGS = -I ./include -I $(LIBC)/include
+INCFLAGS = -I ./include -I $(LIBC)/include -I $(LIBC)/compat-include
 EXTFLAGS = 
 
 CFLAGS = $(STDFLAGS) $(FREEFLAGS) $(WARNFLAGS) $(ARCHFLAGS) $(PROTFLAGS) $(GCFLAGS) $(OPTFLAGS) $(INCFLAGS) $(EXTFLAGS)

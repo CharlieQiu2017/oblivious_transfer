@@ -1,6 +1,6 @@
 #include <string.h>
-#include <exit.h>
-#include <random.h>
+#include <stdlib.h>
+#include <sys/random.h>
 #include <oblivious.hpp>
 #include <ntrulpr_653.hpp>
 #include <shake.hpp>
